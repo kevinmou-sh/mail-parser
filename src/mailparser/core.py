@@ -296,6 +296,28 @@ class MailParser:
 
         return mail
 
+    def _process_parts(self, message_parts, parts_list, nested_mails_list, level=0):
+        """
+        Process all parts but not nested mails
+        """
+        for part in message_parts:
+            content_type = part.get_content_type()
+            logging.debug(f"Level {level} -> Processing part {content_type}, payload length {len(part.get_payload())}")
+            if content_type == "message/rfc822":
+                # Pick the nested email
+                payload = "".join([m.as_string() for m in part.get_payload(decode=False)])
+                payload_bytes = payload.encode(part.get_content_charset("utf-8"))
+                nested_mails_list.append({
+                    "filename":  decode_header_part(part.get_filename()),
+                    "payload": payload_bytes,
+                    "content-id": decode_header_part(part.get("content-id")),
+                })
+            else:
+                self._append_defects(part, content_type)
+                parts_list.append(part)
+                if part.is_multipart():
+                    self._process_parts(part.get_payload(), parts_list, nested_mails_list, level + 1)
+
     def parse(self):
         """
         This method parses the raw email and makes the tokens.
@@ -312,10 +334,11 @@ class MailParser:
         parts = []  # Normal parts plus defects
 
         # walk all mail parts to search defects
-        for p in self.message.walk():
-            part_content_type = p.get_content_type()
-            self._append_defects(p, part_content_type)
-            parts.append(p)
+        # for p in self.message.walk():
+        #     part_content_type = p.get_content_type()
+        #     self._append_defects(p, part_content_type)
+        #     parts.append(p)
+        self._process_parts(self.message.walk(), parts, self.nested_mails)
 
         # If defects are in epilogue defects get epilogue
         if self.defects_categories & EPILOGUE_DEFECTS:
